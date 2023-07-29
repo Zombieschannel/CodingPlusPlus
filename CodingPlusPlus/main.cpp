@@ -214,8 +214,220 @@ struct Raycaster
     }
 };
 
+struct Astar
+{
+    vector<Vector2i> AStar(const Image& img, const Vector2u& startPoint, const Vector2u& endPoint, const Color& obstacles)
+    {
+        enum Direction
+        {
+            Left,
+            Right,
+            Up,
+            Down,
+            LeftUp,
+            LeftDown,
+            RightUp,
+            RightDown
+        };
+        struct Node
+        {
+            Direction dir;
+            int startDistanceCost = -1;
+            int endDistanceCost = -1;
+            Vector2u position;
+            bool isOpen = 1;
+        };
+        //								Left				Right			Up				Down			LeftUp			LeftDown		RightUp			RightDown
+        Vector2i directions[] = { Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, -1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(1, 1) };
+        vector<Node> nodes;
+
+        //add start node
+        nodes.emplace_back(); //add new node to the end of the array
+        nodes.back().position = startPoint;
+        nodes.back().startDistanceCost = 0;
+        nodes.back().endDistanceCost = 0;
+
+        int nodeID = 0; //node to process
+
+        while (nodes.size() > 0)
+        {
+            //node processing
+            //target node
+            Node* targetNode = &nodes[nodeID];
+            targetNode->isOpen = false; //close the node
+            for (int i = 0; i < 8; i++) //for each direction
+            {
+                Vector2i pos = (Vector2i)targetNode->position + directions[i];
+
+                //check if out of bounds
+                if (pos.x < 0 || pos.y < 0 || pos.x >= img.getSize().x || pos.y >= img.getSize().y)
+                    continue;
+
+                //check if obstacle
+                if (img.getPixel(pos.x, pos.y) == obstacles)
+                    continue;
+
+                //check if already exists
+                bool exists = false;
+                for (auto& n : nodes)
+                {
+                    if (n.position == (Vector2u)pos)
+                    {
+                        //update cost if lower
+                        //distance from the end stays the same
+                        if (n.isOpen)
+                        {
+                            if (i >= 4) //if diagonal
+                            {
+                                if (n.startDistanceCost > targetNode->startDistanceCost + 14)
+                                {
+                                    n.startDistanceCost = targetNode->startDistanceCost + 14;
+                                    n.dir = (Direction)i;
+                                }
+                            }
+                            else
+                            {
+                                if (n.startDistanceCost > targetNode->startDistanceCost + 10)
+                                {
+                                    n.startDistanceCost = targetNode->startDistanceCost + 10;
+                                    n.dir = (Direction)i;
+                                }
+                            }
+                        }
+
+                        exists = true;
+                        break;
+                    }
+                }
+                if (exists)
+                    continue;
+
+                nodes.emplace_back(); //add new node to the end of the array
+                //since we resized the array the targetNode pointer becomes invalid!
+                targetNode = &nodes[nodeID];
+
+                nodes.back().position = (Vector2u)pos;
+                nodes.back().dir = (Direction)i;
+
+                if (pos == (Vector2i)endPoint)
+                {
+                    //end path processing
+                    vector<Vector2i> dir;
+
+                    //start from end point
+                    Vector2i currentPos = (Vector2i)pos;
+                    dir.push_back(directions[i]);
+                    currentPos += -directions[i];
+                    do
+                    {
+                        //find node on pos
+                        for (auto& n : nodes)
+                        {
+                            if (!n.isOpen && n.position == (Vector2u)currentPos)
+                            {
+                                dir.push_back(directions[n.dir]);
+                                currentPos += -directions[n.dir];
+                                break;
+                            }
+                        }
+                    } while (currentPos != (Vector2i)startPoint);
+                    reverse(dir.begin(), dir.end());
+                    return dir;
+                }
+
+                //calculate costs
+                if (i >= 4) //if diagonal
+                    nodes.back().startDistanceCost = targetNode->startDistanceCost + 14;
+                else
+                    nodes.back().startDistanceCost = targetNode->startDistanceCost + 10;
+                Vector2i distance = Vector2i(pos.x - (int)endPoint.x, pos.y - (int)endPoint.y);
+                //distance from end node
+                nodes.back().endDistanceCost = sqrt(distance.x * distance.x + distance.y * distance.y) * 10;
+            }
+
+            //node picking
+            //find node with minimum total cost
+            int minCost = INT32_MAX;
+            int closest = INT32_MAX;
+            int minID = -1;
+            for (int i = 0; i < nodes.size(); i++)
+            {
+                if (!nodes[i].isOpen) //node must be open
+                    continue;
+                if (nodes[i].endDistanceCost + nodes[i].startDistanceCost < minCost ||
+                    nodes[i].endDistanceCost + nodes[i].startDistanceCost == minCost && nodes[i].endDistanceCost < closest)
+                {
+                    minCost = nodes[i].endDistanceCost + nodes[i].startDistanceCost;
+                    minID = i;
+                    closest = nodes[i].endDistanceCost;
+                }
+            }
+            //no open nodes left, break, failed
+            if (minID == -1)
+                break;
+            nodeID = minID;
+        }
+        return vector<Vector2i>();
+    }
+public:
+    void Start()
+    {
+        Vector2u startPoint;
+        Vector2u endPoint;
+        Image map;
+        map.loadFromFile("Res/map.png");
+        //find start and end points
+        for (int i = 0; i < map.getSize().x; i++)
+            for (int j = 0; j < map.getSize().y; j++)
+            {
+                if (map.getPixel(i, j) == Color::Red)
+                    startPoint = Vector2u(i, j);
+                if (map.getPixel(i, j) == Color::Green)
+                    endPoint = Vector2u(i, j);
+            }
+
+        Clock c;
+        vector<Vector2i> path = AStar(map, startPoint, endPoint, Color::Black);
+
+        //visualization
+        cout << "Time: " << c.getElapsedTime().asSeconds() << endl;
+        cout << "Steps: " << endl;
+        cout << path.size() << endl;
+        RenderWindow window;
+        window.create(VideoMode(800, 800), "A*");
+        window.setFramerateLimit(60);
+        Texture t;
+        Sprite s;
+
+        Vector2i pos = (Vector2i)startPoint;
+        int cnt = 0;
+        while (window.isOpen())
+        {
+            Event e;
+            while (window.pollEvent(e))
+            {
+                if (e.type == Event::Closed)
+                    window.close();
+            }
+            window.clear();
+            map.setPixel(pos.x, pos.y, Color::Magenta);
+
+            if (cnt < path.size() - 1)
+            {
+                pos += path[cnt];
+                cnt++;
+            }
+            t.loadFromImage(map);
+            s.setTexture(t);
+            s.setScale((float)window.getSize().x / t.getSize().x, (float)window.getSize().y / t.getSize().y);
+            window.draw(s);
+            window.display();
+        }
+    }
+};
+
 int main()
 {
-    Raycaster app;
+    Astar app;
     app.Start();
 }
